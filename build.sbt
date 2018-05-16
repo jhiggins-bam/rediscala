@@ -1,6 +1,5 @@
 lazy val common = Seq(
     organization := "com.github.Ma27",
-    name := "rediscala",
     publishTo := {
       val nexus = "https://oss.sonatype.org/"
       if (isSnapshot.value)
@@ -56,11 +55,11 @@ lazy val common = Seq(
     apiURL := Some(url("http://etaty.github.io/rediscala/"))
   )
 
-lazy val root = (project in file(".")).settings(common)
+lazy val root = (project in file(".")).settings(common, name := "rediscala")
 
 lazy val bench = (project in file("src/bench"))
   .settings(
-      common,
+      name := "rediscala-bench",
       testFrameworks += new TestFramework("org.scalameter.ScalaMeterFramework"),
       parallelExecution in Test := false,
       logBuffered := false,
@@ -68,4 +67,4 @@ lazy val bench = (project in file("src/bench"))
       libraryDependencies ++= Seq(
         "com.storm-enroute" %% "scalameter" % "0.9"
       )
-   ).aggregate(root)
+   ).dependsOn(root)
