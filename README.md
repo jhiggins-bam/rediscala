@@ -48,3 +48,16 @@ $ apt install sbt redis-server ruby redis-tools
 $ export REDIS_TRIB_DIR=/usr/share/doc/redis-tools/examples
 $ sbt test
 ```
+
+### Benchmarks
+
+The codebase has been benchmarked using [ScalaMeter](http://scalameter.github.io/) according to which
+this library is able to serve about [250,000 requests per second](http://bit.ly/rediscalabench-1-1).
+
+The benchmarks can be run locally using the `bench` build in SBT:
+
+```
+nix-shell --run "sbt bench/test"
+```
+
+The results can be found in `rediscala/tmp/report/index.html`.
