@@ -26,7 +26,7 @@ active feature development. In case you'd like to help out, feel free to
 The build artifacts live in the [Maven Central](https://mvnrepository.com/repos/central) repository
 and can be installed with [SBT](https://www.scala-sbt.org/):
 
-```
+``` scala
 # build.sbt
 libraryDependencies += "com.github.Ma27" %% "rediscala" % "1.8.3"
 ```
@@ -37,8 +37,7 @@ The easiest way to start hacking on this project is using [Nix](https://nixos.or
 development environment:
 
 ```
-$ nix-shell
-[nix-shell]$ sbt test
+$ nix-shell --run "sbt test"
 ```
 
 It's develop on other distros such as [Ubuntu](https://www.ubuntu.com/):
