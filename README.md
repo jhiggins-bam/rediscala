@@ -23,7 +23,7 @@ active feature development. In case you'd like to help out, feel free to
 
 ### Installation
 
-The build artifacts live in the [Maven Central](https://mvnrepository.com/repos/central) repository
+The build artifacts live in the [Maven Central](http://search.maven.org/#search%7Cga%7C1%7Ccom.github.Ma27.rediscala) repository
 and can be installed with [SBT](https://www.scala-sbt.org/):
 
 ``` scala
@@ -56,7 +56,7 @@ this library is able to serve about [250,000 requests per second](http://bit.ly/
 The benchmarks can be run locally using the `bench` build in SBT:
 
 ```
-nix-shell --run "sbt bench/test"
+$ nix-shell --run "sbt bench/test"
 ```
 
 The results can be found in `rediscala/tmp/report/index.html`.
