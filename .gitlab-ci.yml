@@ -1,0 +1,13 @@
+image: lnl7/nix
+stages:
+  - build
+
+build:
+  stage: build
+  script:
+    - nix-shell --run "sbt clean coverage +test coverageReport coverageAggregate"
+  artifacts:
+    paths:
+      - target/test-reports
+      - target/scala-*/scoverage-report
+    expire_in: 8 hours
