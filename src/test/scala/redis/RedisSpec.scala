@@ -265,6 +265,34 @@ abstract class RedisClusterClients() extends RedisHelper {
 
   }
 
+  def addServer(): Int = {
+    println("Add server")
+    val nextPort = portNumber.getAndIncrement()
+    Process(newNode(nextPort), fileDir).run(processLogger)
+    Thread.sleep(2000)
+    val node = s"$redisHost:$nextPort"
+    val master = s"$redisHost:${nodePorts.head}"
+
+    val redisTrib = Process(s"$redisTribPath/redis-trib.rb add-node --slave $node $master").run(processLogger).exitValue()
+    println(s"Add-node exitValue: $redisTrib")
+    Thread.sleep(2000)
+    nextPort
+  }
+
+  def removeServer(port: Int, clusterId: String) = {
+    println("Remove server")
+    val out = new Socket(redisHost, port).getOutputStream
+    out.write("SHUTDOWN NOSAVE\n".getBytes)
+    out.flush
+
+    nodePorts.map { port =>
+      val out = new Socket(redisHost, port).getOutputStream
+      out.write(s"CLUSTER FORGET $clusterId".getBytes)
+      out.flush
+    }
+    Thread.sleep(5000)
+  }
+
   override def cleanup() = {
     println("Stop begin")
     //cluster shutdown

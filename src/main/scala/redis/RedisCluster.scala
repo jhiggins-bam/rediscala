@@ -1,6 +1,6 @@
 package redis
 
-import java.util.concurrent.{ThreadLocalRandom, TimeUnit}
+import java.util.concurrent.ThreadLocalRandom
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.event.Logging
@@ -9,32 +9,21 @@ import redis.api.clusters.{ClusterNode, ClusterSlot}
 import redis.protocol.RedisReply
 import redis.util.CRC16
 
-import scala.concurrent.duration.Duration
 import scala.concurrent.stm.Ref
-import scala.concurrent.{Await, Future, Promise}
+import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
 
 
-case class RedisCluster(redisServers: Seq[RedisServer],
-                           name: String = "RedisClientPool")
-                          (implicit _system: ActorSystem,
-                           redisDispatcher: RedisDispatcher = Redis.dispatcher
-                          ) extends RedisClientPoolLike(_system, redisDispatcher)  with RedisCommands {
+abstract class RedisCluster(override val name: String = "RedisClientPool")
+                           (implicit _system: ActorSystem,
+                            redisDispatcher: RedisDispatcher = Redis.dispatcher
+                           ) extends RedisClientPoolLike(_system, redisDispatcher) with RedisCommands {
 
-  val log = Logging.getLogger(_system, this)
+  def redisServers: Seq[RedisServer]
 
-  val clusterSlotsRef:Ref[Option[Map[ClusterSlot, RedisConnection]]] = Ref(Option.empty[Map[ClusterSlot, RedisConnection]])
-  val lockClusterSlots = Ref(true)
+  protected val log = Logging.getLogger(_system, this)
 
-  override val redisServerConnections = {
-    redisServers.map { server =>
-      makeRedisConnection(server, defaultActive = true)
-    } toMap
-  }
-  refreshConnections()
-
-
-  def equalsHostPort(clusterNode:ClusterNode,server:RedisServer) = {
+  protected def equalsHostPort(clusterNode:ClusterNode,server:RedisServer) = {
     clusterNode.host == server.host &&  clusterNode.port == server.port
   }
 
@@ -43,7 +32,7 @@ case class RedisCluster(redisServers: Seq[RedisServer],
       if (active.single.compareAndSet(!status, status)) {
         refreshConnections()
       }
-      
+
       clusterSlotsRef.single.get.map { clusterSlots =>
         if (clusterSlots.keys.exists( cs => equalsHostPort(cs.master,server) )){
           log.info("one master is still dead => refresh clusterSlots")
@@ -54,7 +43,10 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     }
   }
 
-  def getClusterSlots(): Future[Map[ClusterSlot, RedisConnection]] = {
+  protected val clusterSlotsRef: Ref[Option[Map[ClusterSlot, RedisConnection]]] = Ref(Option.empty[Map[ClusterSlot, RedisConnection]])
+  protected val lockClusterSlots = Ref(true)
+
+  protected def getClusterSlots(): Future[Map[ClusterSlot, RedisConnection]] = {
 
     def resolveClusterSlots(retry:Int): Future[Map[ClusterSlot, RedisConnection]] = {
       clusterSlots().map { clusterSlots =>
@@ -74,28 +66,33 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     resolveClusterSlots(3) //retry 3 times
   }
 
-  def asyncRefreshClusterSlots(force:Boolean=false): Future[Unit] = {
-    if( force || lockClusterSlots.single.compareAndSet(false,true) ) {
-     try {
-       getClusterSlots().map { clusterSlot =>
-         log.info("refreshClusterSlots: " + clusterSlot.toString())
-         clusterSlotsRef.single.set(Some(clusterSlot))
-         lockClusterSlots.single.compareAndSet(true, false)
-         ()
-       }.recoverWith {
-         case NonFatal(e) =>
-           log.error("refreshClusterSlots:",e)
-           lockClusterSlots.single.compareAndSet(true, false)
-           Future.failed(e)
-       }
-     }catch{
-       case NonFatal(e) =>
-         lockClusterSlots.single.compareAndSet(true, false)
-         throw e
-     }
-    }else{
-
-     Future.successful(clusterSlotsRef.single.get)
+  protected def asyncRefreshClusterSlots(force: Boolean = false, retry: Int = 3): Future[Unit] = {
+    if (force || lockClusterSlots.single.compareAndSet(false, true)) {
+      try {
+        getClusterSlots().map { clusterSlot =>
+          log.info("refreshClusterSlots: " + clusterSlot.toString())
+          clusterSlotsRef.single.set(Some(clusterSlot))
+          lockClusterSlots.single.compareAndSet(true, false)
+          ()
+        }.recoverWith {
+          case NonFatal(e) =>
+            log.warning("refreshClusterSlots:", e)
+            lockClusterSlots.single.compareAndSet(true, false)
+            if(retry > 0){
+              log.warning("refreshClusterSlots: Retrying...")
+              Thread.sleep(250L)
+              asyncRefreshClusterSlots(force, retry-1)
+            } else {
+              Future.failed(e)
+            }
+        }
+      } catch {
+        case NonFatal(e) =>
+          lockClusterSlots.single.compareAndSet(true, false)
+          throw e
+      }
+    } else {
+      Future.successful(clusterSlotsRef.single.get)
     }
   }
 
@@ -105,7 +102,7 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     promise.future
   }
 
-  def getRedisConnection(slot:Int):Option[RedisConnection] = {
+  protected def getRedisConnection(slot:Int):Option[RedisConnection] = {
         getClusterAndConnection(slot)
           .map{ case ( _,redisConnection ) => redisConnection  }
 
@@ -124,7 +121,7 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     }
   }
 
-  val redirectMessagePattern = """(MOVED|ASK) \d+ (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)""".r
+  protected val redirectMessagePattern = """(MOVED|ASK) \d+ (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)""".r
   override def send[T](redisCommand: RedisCommand[_ <: RedisReply, T]): Future[T] = {
 
     val maybeRedisActor:Option[ActorRef]  = getRedisActor(redisCommand)
@@ -158,7 +155,7 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     }.getOrElse(Future.failed(new RuntimeException("server not found: no server available")))
   }
 
-  def getRedisActor[T](redisCommand: RedisCommand[_ <: RedisReply, T]): Option[ActorRef] = {
+  protected def getRedisActor[T](redisCommand: RedisCommand[_ <: RedisReply, T]): Option[ActorRef] = {
     redisCommand match {
       case clusterKey: ClusterKey =>
         getRedisConnection(clusterKey.getSlot())
@@ -176,13 +173,11 @@ case class RedisCluster(redisServers: Seq[RedisServer],
     }
   }
 
-  def groupByCluserServer(keys:Seq[String]): Seq[Seq[String]] = {
+  def groupByClusterServer(keys:Seq[String]): Seq[Seq[String]] = {
     keys.groupBy{
       key => getRedisConnection(RedisComputeSlot.hashSlot(key))
     }.values.toSeq
   }
-
-  Await.result(asyncRefreshClusterSlots(force=true), Duration(10,TimeUnit.SECONDS))
 }
 
 

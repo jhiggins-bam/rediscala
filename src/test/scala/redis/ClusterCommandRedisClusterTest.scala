@@ -8,16 +8,15 @@ import redis.protocol._
 
 import scala.concurrent.Await
 
-/**
-  * Created by npeters on 20/05/16.
-  */
-class RedisClusterTest extends RedisClusterClients {
+class ClusterCommandRedisClusterTest extends RedisClusterClients {
 
 
-  var redisCluster:RedisCluster = null
+  var redisCluster:MutableRedisCluster = null
   override def setup(): Unit = {
     super.setup()
-    redisCluster = new ImmutableRedisCluster(nodePorts.map(p=>RedisServer(RedisServerHelper.redisHost,p)))
+    redisCluster = new ClusterCommandRedisCluster(RedisServerHelper.redisHost, Some(nodePorts.head))
+    nodePorts.foreach(p => redisCluster.addServer(RedisServer(RedisServerHelper.redisHost, p)))
+    Thread.sleep(5000)
   }
 
   sequential
@@ -66,7 +65,7 @@ class RedisClusterTest extends RedisClusterClients {
       Await.result(redisCluster.exists("foo"), timeOut) mustEqual(true)
 
       println("get")
-      Await.result(redisCluster.get[String]("foo"), timeOut)  mustEqual Some("FOO")
+      Await.result(redisCluster.get[String]("foo"), timeOut) mustEqual Some("FOO")
 
       println("del")
       Await.result(redisCluster.del("foo","foo"), timeOut)
@@ -108,7 +107,7 @@ class RedisClusterTest extends RedisClusterClients {
       Await.result(redisCluster.set[String]("foo1","FOO"), timeOut)
       Await.result(redisCluster.get[String]("foo1"), timeOut)
       println("wait...")
-     // Thread.sleep(15000)
+      // Thread.sleep(15000)
       println("get")
       Await.result(redisCluster.get[String]("foo1"), timeOut) mustEqual Some("FOO")
 
@@ -141,6 +140,34 @@ class RedisClusterTest extends RedisClusterClients {
       res.size mustEqual 6
       res.count(_.master != "-") mustEqual 3
       res.count(_.link_state == "connected") mustEqual 6
+    }
+  }
+
+
+
+  "mutate servers" should {
+    "add and remove a server" in {
+      val port = addServer()
+      val previousCount = redisCluster.redisServers.length
+      val server = RedisServer(RedisServerHelper.redisHost, port)
+
+      val previousNodeIds: Seq[String] = Await.result(redisCluster.clusterNodes(), timeOut).map(_.id)
+
+      println("Add server")
+      redisCluster.addServer(server)
+      redisCluster.redisServers.length mustEqual previousCount + 1
+      val clusterResponse = Await.result(redisCluster.clusterNodes(), timeOut)
+      clusterResponse.length mustEqual previousCount + 1
+      var newNodeId: String = null
+      clusterResponse.foreach(cr => {
+        if(!previousNodeIds.contains(cr.id)){
+          newNodeId = cr.id
+        }
+      })
+      println("Remove server")
+      redisCluster.removeServer(server)
+      removeServer(port, newNodeId)
+      redisCluster.redisServers.length mustEqual previousCount
     }
   }
 }
